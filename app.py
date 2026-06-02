@@ -1,134 +1,133 @@
 import streamlit as st
-import random
-import time
+from google import genai
+from google.genai import types
 
 # 페이지 설정
 st.set_page_config(
-    page_title="미니 지렁이 게임",
-    page_icon="🐍",
-    layout="centered"
+    page_title="연애상담 챗봇",
+    page_icon="💌",
 )
 
-st.title("🐍 미니 지렁이 게임")
+st.title("💌 연애상담 챗봇")
+st.caption("Gemini 2.5 Flash Lite 기반 상담 챗봇")
 
-# 게임 크기
-SIZE = 10
+# API 키 불러오기
+try:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    st.error("Secrets에 GEMINI_API_KEY를 등록해주세요.")
+    st.stop()
+
+# Gemini 클라이언트 생성
+try:
+    client = genai.Client(api_key=api_key)
+except Exception as e:
+    st.error(f"Gemini 클라이언트 생성 실패: {e}")
+    st.stop()
+
+# 시스템 프롬프트
+SYSTEM_PROMPT = """
+너는 따뜻하고 공감 능력이 뛰어난 연애상담 챗봇이다.
+
+규칙:
+- 사용자의 감정을 존중한다.
+- 비난하거나 공격적으로 말하지 않는다.
+- 현실적이고 도움이 되는 조언을 제공한다.
+- 짧고 읽기 쉽게 답변한다.
+- 필요하면 위로와 공감을 먼저 한다.
+"""
 
 # 세션 상태 초기화
-if "snake" not in st.session_state:
-    st.session_state.snake = [(5, 5)]
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-if "food" not in st.session_state:
-    st.session_state.food = (
-        random.randint(0, SIZE - 1),
-        random.randint(0, SIZE - 1)
-    )
+# 이전 대화 출력
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-if "direction" not in st.session_state:
-    st.session_state.direction = "RIGHT"
+# 사용자 입력
+user_input = st.chat_input("연애 고민을 이야기해보세요...")
 
-if "game_over" not in st.session_state:
-    st.session_state.game_over = False
+if user_input:
+    # 사용자 메시지 저장
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_input
+    })
 
-# 방향 버튼
-col1, col2, col3 = st.columns(3)
+    # 사용자 메시지 출력
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-with col2:
-    if st.button("⬆️"):
-        st.session_state.direction = "UP"
+    # AI 응답 생성
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
 
-col1, col2, col3 = st.columns(3)
+        try:
+            # 대화 기록 문자열 생성
+            history_text = ""
 
-with col1:
-    if st.button("⬅️"):
-        st.session_state.direction = "LEFT"
+            for msg in st.session_state.messages:
+                role = "사용자" if msg["role"] == "user" else "상담사"
+                history_text += f"{role}: {msg['content']}\n"
 
-with col2:
-    if st.button("⬇️"):
-        st.session_state.direction = "DOWN"
+            prompt = f"""
+{SYSTEM_PROMPT}
 
-with col3:
-    if st.button("➡️"):
-        st.session_state.direction = "RIGHT"
+다음은 지금까지의 대화 내용이다.
 
-# 게임 로직
-if not st.session_state.game_over:
+{history_text}
 
-    head_x, head_y = st.session_state.snake[0]
+상담사 답변:
+"""
 
-    if st.session_state.direction == "UP":
-        head_x -= 1
-    elif st.session_state.direction == "DOWN":
-        head_x += 1
-    elif st.session_state.direction == "LEFT":
-        head_y -= 1
-    elif st.session_state.direction == "RIGHT":
-        head_y += 1
-
-    new_head = (head_x, head_y)
-
-    # 벽 충돌
-    if (
-        head_x < 0 or head_x >= SIZE or
-        head_y < 0 or head_y >= SIZE
-    ):
-        st.session_state.game_over = True
-
-    # 몸 충돌
-    elif new_head in st.session_state.snake:
-        st.session_state.game_over = True
-
-    else:
-        st.session_state.snake.insert(0, new_head)
-
-        # 음식 먹기
-        if new_head == st.session_state.food:
-            st.session_state.food = (
-                random.randint(0, SIZE - 1),
-                random.randint(0, SIZE - 1)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.8,
+                    max_output_tokens=500,
+                )
             )
-        else:
-            st.session_state.snake.pop()
 
-# 게임판 만들기
-board = ""
+            ai_response = response.text
 
-for i in range(SIZE):
-    for j in range(SIZE):
+            # 응답 출력
+            message_placeholder.markdown(ai_response)
 
-        if (i, j) == st.session_state.food:
-            board += "🍎"
+            # 대화 저장
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": ai_response
+            })
 
-        elif (i, j) in st.session_state.snake:
-            if (i, j) == st.session_state.snake[0]:
-                board += "🐍"
-            else:
-                board += "🟩"
+        except Exception as e:
+            error_message = f"오류가 발생했어요 😢\n\n{str(e)}"
 
-        else:
-            board += "⬜"
+            message_placeholder.error(error_message)
 
-    board += "\n"
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": error_message
+            })
 
-st.text(board)
+# 사이드바
+with st.sidebar:
+    st.header("⚙️ 설정")
 
-# 점수
-st.write(f"점수: {len(st.session_state.snake) - 1}")
-
-# 게임 오버
-if st.session_state.game_over:
-    st.error("💀 게임 오버!")
-
-    if st.button("다시 시작"):
-        st.session_state.snake = [(5, 5)]
-        st.session_state.food = (
-            random.randint(0, SIZE - 1),
-            random.randint(0, SIZE - 1)
-        )
-        st.session_state.direction = "RIGHT"
-        st.session_state.game_over = False
+    if st.button("대화 초기화"):
+        st.session_state.messages = []
         st.rerun()
 
-# 자동 새로고침
-time.sleep(0.3)
-st.rerun()
+    st.markdown("---")
+    st.markdown("""
+### 📌 사용 모델
+- gemini-2.5-flash-lite
+
+### 💡 예시 질문
+- 썸남이 연락이 줄었어요
+- 헤어진 전애인이 생각나요
+- 고백해도 될까요?
+- 장거리 연애가 힘들어요
+""")
